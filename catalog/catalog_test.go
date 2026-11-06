@@ -11,7 +11,7 @@ import (
 )
 
 func TestParseAndImport(t *testing.T) {
-	fixture := `{"p1":{"models":{"m":{"name":"Model","cost":{"input":1e-4,"output":3.50,"tiers":[{"tier":1}]}},"zero":{"cost":{"input":0,"output":0}},"missing":{}}},"p2":{"models":{"m":{"name":"Other","cost":{"input":2,"output":5}}}}}`
+	fixture := `{"p1":{"models":{"m":{"name":"Model","modalities":{"input":["text"],"output":["text"]},"cost":{"input":1e-4,"output":3.50,"tiers":[{"tier":1}]}},"zero":{"cost":{"input":0,"output":0}},"missing":{}}},"p2":{"models":{"m":{"name":"Other","modalities":{"input":["text"],"output":["text"]},"cost":{"input":2,"output":5}}}}}`
 	c, e := Parse(strings.NewReader(fixture), time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
 	if e != nil {
 		t.Fatal(e)
@@ -60,5 +60,28 @@ func TestEmbedded(t *testing.T) {
 	}
 	if _, ok := c.Search("openai/gpt")["openai/gpt-5.3-codex"]; !ok {
 		t.Fatal("missing known model")
+	}
+}
+
+func TestAudioComponentsDoNotBecomeTextPrices(t *testing.T) {
+	fixture := `{"p":{"models":{"audio-only":{"name":"Audio","modalities":{"input":["audio"],"output":["audio"]},"cost":{"input":3,"output":4,"input_audio":2,"output_audio":4}}}}}`
+	c, err := Parse(strings.NewReader(fixture), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Models) != 0 || len(c.AudioPrices) != 2 || c.Skipped != 1 {
+		t.Fatalf("models %d audio %d skipped %d", len(c.Models), len(c.AudioPrices), c.Skipped)
+	}
+	out := c.AudioPrices["p/audio-only#audio-output-token"]
+	if out.Modality != "audio" || out.Unit != "token" || out.Amount != "4" || out.Per != "1000000" {
+		t.Fatalf("%+v", out)
+	}
+	ledger := price.New("USD")
+	a, u, s, err := ledger.ImportMediaPrices(c.AudioPrices, false)
+	if err != nil || a != 2 || u != 0 || s != 0 {
+		t.Fatalf("%d %d %d %v", a, u, s, err)
+	}
+	if got, err := ledger.QuoteMedia("p/audio-only#audio-output-token", "500000", "USD"); err != nil || got != "2" {
+		t.Fatalf("%s %v", got, err)
 	}
 }

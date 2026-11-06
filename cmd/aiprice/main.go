@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	aiprice "github.com/neko233-com/ai-price-lib-go"
 	"github.com/neko233-com/ai-price-lib-go/catalog"
@@ -41,7 +42,7 @@ func run() error {
 	fs := flag.NewFlagSet("aiprice", flag.ContinueOnError)
 	path := fs.String("config", "aiprice.json", "configuration file")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "usage: aiprice [-config file] init BASE | put KIND ID | get KIND [ID] | delete KIND ID | report CURRENCY [AGENT] | convert AMOUNT FROM TO | catalog search QUERY | catalog import [embedded|online] [overwrite]\nput reads a JSON value from standard input; KIND is agent, model, rate or usage")
+		fmt.Fprintln(fs.Output(), "usage: aiprice [-config file] init BASE | put KIND ID | get KIND [ID] | delete KIND ID | report CURRENCY [AGENT] | convert AMOUNT FROM TO | catalog search QUERY | catalog search-media QUERY | catalog import [embedded|online] [overwrite]\nput reads a JSON value from standard input; KIND is agent, model, rate, usage, media-price or media-usage")
 	}
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -51,18 +52,28 @@ func run() error {
 		fs.Usage()
 		return errors.New("missing command")
 	}
+	mutating := args[0] == "init" || args[0] == "put" || args[0] == "delete" || (args[0] == "catalog" && len(args) > 1 && args[1] == "import")
+	if mutating {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return aiprice.WithFileLock(ctx, *path, func() error { return runCommand(*path, args) })
+	}
+	return runCommand(*path, args)
+}
+
+func runCommand(path string, args []string) error {
 	if args[0] == "init" {
 		if len(args) != 2 {
 			return errors.New("init requires BASE")
 		}
-		if _, err := os.Stat(*path); err == nil {
+		if _, err := os.Stat(path); err == nil {
 			return errors.New("configuration already exists")
 		} else if !os.IsNotExist(err) {
 			return err
 		}
-		return aiprice.New(args[1]).Save(*path)
+		return aiprice.New(args[1]).Save(path)
 	}
-	if args[0] == "catalog" && len(args) >= 2 && args[1] == "search" {
+	if args[0] == "catalog" && len(args) >= 2 && (args[1] == "search" || args[1] == "search-media") {
 		if len(args) != 3 {
 			return errors.New("catalog search requires QUERY")
 		}
@@ -70,9 +81,12 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		if args[1] == "search-media" {
+			return printJSON(cat.SearchAudio(args[2]))
+		}
 		return printJSON(cat.Search(args[2]))
 	}
-	c, err := aiprice.Load(*path)
+	c, err := aiprice.Load(path)
 	if err != nil {
 		return err
 	}
@@ -108,7 +122,11 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		if err = c.Save(*path); err != nil {
+		mediaAdded, mediaUpdated, mediaSkipped, err := c.ImportMediaPrices(cat.AudioPrices, overwrite)
+		if err != nil {
+			return err
+		}
+		if err = c.Save(path); err != nil {
 			return err
 		}
 		tiered := 0
@@ -117,7 +135,7 @@ func run() error {
 				tiered++
 			}
 		}
-		return printJSON(map[string]any{"source": cat.Source, "retrieved_at": cat.RetrievedAt, "available": len(cat.Models), "source_skipped": cat.Skipped, "tiered_models": tiered, "added": added, "updated": updated, "existing_skipped": skipped})
+		return printJSON(map[string]any{"source": cat.Source, "retrieved_at": cat.RetrievedAt, "available": len(cat.Models), "source_skipped": cat.Skipped, "tiered_models": tiered, "added": added, "updated": updated, "existing_skipped": skipped, "audio_available": len(cat.AudioPrices), "audio_added": mediaAdded, "audio_updated": mediaUpdated, "audio_existing_skipped": mediaSkipped})
 	case "put":
 		if len(args) != 3 {
 			return errors.New("put requires KIND ID")
@@ -138,6 +156,21 @@ func run() error {
 			if err = readJSON(&v); err == nil {
 				err = c.SetRate(args[2], v)
 			}
+		case "media-price":
+			var v aiprice.MediaPrice
+			if err = readJSON(&v); err == nil {
+				err = c.SetMediaPrice(args[2], v)
+			}
+		case "media-usage":
+			var v struct {
+				Agent    string `json:"agent"`
+				PriceID  string `json:"price_id"`
+				Quantity string `json:"quantity"`
+				Time     string `json:"time"`
+			}
+			if err = readJSON(&v); err == nil {
+				err = c.SetMediaUsage(args[2], aiprice.MediaUsage{Agent: v.Agent, PriceID: v.PriceID, Quantity: v.Quantity, Time: v.Time})
+			}
 		case "usage":
 			var v struct {
 				Agent        string `json:"agent"`
@@ -155,7 +188,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		return c.Save(*path)
+		return c.Save(path)
 	case "delete":
 		if len(args) != 3 {
 			return errors.New("delete requires KIND ID")
@@ -163,7 +196,7 @@ func run() error {
 		if err = c.Delete(args[1], args[2]); err != nil {
 			return err
 		}
-		return c.Save(*path)
+		return c.Save(path)
 	case "get":
 		if len(args) < 2 || len(args) > 3 {
 			return errors.New("get requires KIND [ID]")
@@ -178,6 +211,10 @@ func run() error {
 			all = c.Rates
 		case "usage":
 			all = c.Usages
+		case "media-price":
+			all = c.MediaPrices
+		case "media-usage":
+			all = c.MediaUsages
 		default:
 			return errors.New("unknown kind")
 		}
@@ -185,6 +222,14 @@ func run() error {
 			return printJSON(all)
 		}
 		switch v := all.(type) {
+		case map[string]aiprice.MediaPrice:
+			if x, ok := v[args[2]]; ok {
+				return printJSON(x)
+			}
+		case map[string]aiprice.MediaUsage:
+			if x, ok := v[args[2]]; ok {
+				return printJSON(x)
+			}
 		case map[string]aiprice.Agent:
 			if x, ok := v[args[2]]; ok {
 				return printJSON(x)

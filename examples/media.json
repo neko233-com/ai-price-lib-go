@@ -1,0 +1,17 @@
+{
+  "base_currency": "USD",
+  "rates": {"USD": "1", "CNY": "7.2"},
+  "agents": {"assistant": {"name": "Example agent"}},
+  "models": {"text": {"currency": "USD", "input_per_million": "2.5", "output_per_million": "10"}},
+  "usages": {
+    "text-1": {"agent": "assistant", "model": "text", "input_tokens": 100000, "output_tokens": 20000, "time": "2026-11-06T12:00:00+08:00", "price": {"currency": "USD", "input_per_million": "2.5", "output_per_million": "10"}}
+  },
+  "media_prices": {
+    "tts": {"modality": "audio", "model": "example/tts", "currency": "USD", "unit": "character", "amount": "0.015", "per": "1000"},
+    "video-720p": {"modality": "video", "model": "example/video-720p", "currency": "USD", "unit": "second", "amount": "0.2", "per": "1"}
+  },
+  "media_usages": {
+    "audio-1": {"agent": "assistant", "price_id": "tts", "quantity": "1500", "time": "2026-11-06T12:00:00+08:00", "price": {"modality": "audio", "model": "example/tts", "currency": "USD", "unit": "character", "amount": "0.015", "per": "1000"}},
+    "video-1": {"agent": "assistant", "price_id": "video-720p", "quantity": "2.5", "time": "2026-11-06T12:00:00+08:00", "price": {"modality": "video", "model": "example/video-720p", "currency": "USD", "unit": "second", "amount": "0.2", "per": "1"}}
+  }
+}

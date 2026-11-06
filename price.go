@@ -16,11 +16,13 @@ import (
 
 // Config is the entire portable ledger. Rates are units of each currency per one base unit.
 type Config struct {
-	BaseCurrency string            `json:"base_currency"`
-	Rates        map[string]string `json:"rates"`
-	Agents       map[string]Agent  `json:"agents"`
-	Models       map[string]Price  `json:"models"`
-	Usages       map[string]Usage  `json:"usages"`
+	BaseCurrency string                `json:"base_currency"`
+	Rates        map[string]string     `json:"rates"`
+	Agents       map[string]Agent      `json:"agents"`
+	Models       map[string]Price      `json:"models"`
+	Usages       map[string]Usage      `json:"usages"`
+	MediaPrices  map[string]MediaPrice `json:"media_prices,omitempty"`
+	MediaUsages  map[string]MediaUsage `json:"media_usages,omitempty"`
 }
 type Agent struct {
 	Name string `json:"name"`
@@ -126,6 +128,31 @@ func (c *Config) Validate() error {
 		}
 		if e := c.validatePrice(u.Price); e != nil {
 			return fmt.Errorf("usage %s: %w", id, e)
+		}
+	}
+	for id, p := range c.MediaPrices {
+		if !validID(id) {
+			return fmt.Errorf("invalid media price ID %q", id)
+		}
+		if err := c.validateMediaPrice(p); err != nil {
+			return fmt.Errorf("media price %s: %w", id, err)
+		}
+	}
+	for id, u := range c.MediaUsages {
+		if !validID(id) || !validID(u.PriceID) {
+			return fmt.Errorf("invalid media usage ID or price ID %q", id)
+		}
+		if _, ok := c.Agents[u.Agent]; !ok {
+			return fmt.Errorf("media usage %s: agent %q missing", id, u.Agent)
+		}
+		if _, err := decimal(u.Quantity); err != nil {
+			return fmt.Errorf("media usage %s: %w", id, err)
+		}
+		if _, err := time.Parse(time.RFC3339, u.Time); err != nil {
+			return fmt.Errorf("media usage %s: invalid RFC3339 time", id)
+		}
+		if err := c.validateMediaPrice(u.Price); err != nil {
+			return fmt.Errorf("media usage %s: %w", id, err)
 		}
 	}
 	return nil
@@ -257,6 +284,12 @@ func (c *Config) Delete(kind, id string) error {
 		case "usage":
 			_, exists = x.Usages[id]
 			delete(x.Usages, id)
+		case "media-price":
+			_, exists = x.MediaPrices[id]
+			delete(x.MediaPrices, id)
+		case "media-usage":
+			_, exists = x.MediaUsages[id]
+			delete(x.MediaUsages, id)
 		default:
 			return fmt.Errorf("unknown kind %q", kind)
 		}
@@ -319,10 +352,19 @@ func (c *Config) Total(agent, currency string) (Report, error) {
 		if agent != "" && u.Agent != agent {
 			continue
 		}
-		in, _ := decimal(u.Price.Input)
-		out, _ := decimal(u.Price.Output)
-		charge := new(big.Rat).Add(new(big.Rat).Mul(in, new(big.Rat).SetInt64(u.InputTokens)), new(big.Rat).Mul(out, new(big.Rat).SetInt64(u.OutputTokens)))
-		charge.Quo(charge, big.NewRat(1000000, 1))
+		charge := textCharge(u.Price, u.InputTokens, u.OutputTokens)
+		charge, e := c.convert(charge, u.Price.Currency, currency)
+		if e != nil {
+			return Report{}, e
+		}
+		total.Add(total, charge)
+		count++
+	}
+	for _, u := range c.MediaUsages {
+		if agent != "" && u.Agent != agent {
+			continue
+		}
+		charge := mediaCharge(u.Price, u.Quantity)
 		charge, e := c.convert(charge, u.Price.Currency, currency)
 		if e != nil {
 			return Report{}, e

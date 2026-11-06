@@ -32,18 +32,25 @@ type Entry struct {
 	Tiered   bool        `json:"tiered,omitempty"`
 }
 type Catalog struct {
-	Source      string           `json:"source"`
-	RetrievedAt string           `json:"retrieved_at"`
-	Models      map[string]Entry `json:"models"`
-	Skipped     int              `json:"skipped"`
+	Source      string                      `json:"source"`
+	RetrievedAt string                      `json:"retrieved_at"`
+	Models      map[string]Entry            `json:"models"`
+	Skipped     int                         `json:"skipped"`
+	AudioPrices map[string]price.MediaPrice `json:"audio_prices,omitempty"`
 }
 type rawModel struct {
-	Name string `json:"name"`
+	Name       string `json:"name"`
+	Modalities struct {
+		Input  []string `json:"input"`
+		Output []string `json:"output"`
+	} `json:"modalities"`
 	Cost struct {
-		Input   *json.Number    `json:"input"`
-		Output  *json.Number    `json:"output"`
-		Tiers   json.RawMessage `json:"tiers"`
-		Context json.RawMessage `json:"context_over_200k"`
+		Input       *json.Number    `json:"input"`
+		Output      *json.Number    `json:"output"`
+		InputAudio  *json.Number    `json:"input_audio"`
+		OutputAudio *json.Number    `json:"output_audio"`
+		Tiers       json.RawMessage `json:"tiers"`
+		Context     json.RawMessage `json:"context_over_200k"`
 	} `json:"cost"`
 }
 type rawProvider struct {
@@ -122,9 +129,32 @@ func Parse(r io.Reader, retrieved time.Time) (*Catalog, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("empty catalog")
 	}
-	c := &Catalog{Source: Source, RetrievedAt: retrieved.UTC().Format(time.RFC3339), Models: map[string]Entry{}}
+	c := &Catalog{Source: Source, RetrievedAt: retrieved.UTC().Format(time.RFC3339), Models: map[string]Entry{}, AudioPrices: map[string]price.MediaPrice{}}
 	for provider, p := range raw {
 		for model, m := range p.Models {
+			if provider != "" && model != "" && strings.TrimSpace(provider) == provider && strings.TrimSpace(model) == model {
+				for _, component := range []struct {
+					name  string
+					value *json.Number
+				}{{"input", m.Cost.InputAudio}, {"output", m.Cost.OutputAudio}} {
+					if component.value == nil {
+						continue
+					}
+					amount, err := exact(*component.value)
+					if err != nil || amount == "0" {
+						continue
+					}
+					key := provider + "/" + model + "#audio-" + component.name + "-token"
+					if _, exists := c.AudioPrices[key]; exists {
+						return nil, fmt.Errorf("duplicate media price ID %s", key)
+					}
+					c.AudioPrices[key] = price.MediaPrice{Modality: "audio", Model: provider + "/" + model, Currency: "USD", Unit: "token", Amount: amount, Per: "1000000"}
+				}
+			}
+			if !contains(m.Modalities.Input, "text") || !contains(m.Modalities.Output, "text") {
+				c.Skipped++
+				continue
+			}
 			if provider == "" || model == "" || strings.TrimSpace(provider) != provider || strings.TrimSpace(model) != model || m.Cost.Input == nil || m.Cost.Output == nil {
 				c.Skipped++
 				continue
@@ -143,7 +173,7 @@ func Parse(r io.Reader, retrieved time.Time) (*Catalog, error) {
 			c.Models[key] = Entry{Provider: provider, Model: model, Name: m.Name, Price: price.Price{Currency: "USD", Input: in, Output: out}, Tiered: tiered}
 		}
 	}
-	if len(c.Models) == 0 {
+	if len(c.Models) == 0 && len(c.AudioPrices) == 0 {
 		return nil, errors.New("catalog has no usable model prices")
 	}
 	return c, nil
@@ -193,6 +223,27 @@ func (c *Catalog) Search(query string) map[string]Entry {
 	for id, e := range c.Models {
 		if strings.Contains(strings.ToLower(id), query) || strings.Contains(strings.ToLower(e.Name), query) {
 			out[id] = e
+		}
+	}
+	return out
+}
+
+func contains(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+// SearchAudio searches the explicit audio token prices in the catalog.
+func (c *Catalog) SearchAudio(query string) map[string]price.MediaPrice {
+	out := map[string]price.MediaPrice{}
+	query = strings.ToLower(query)
+	for id, p := range c.AudioPrices {
+		if strings.Contains(strings.ToLower(id), query) {
+			out[id] = p
 		}
 	}
 	return out

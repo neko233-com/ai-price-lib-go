@@ -1,0 +1,50 @@
+name: Verify release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Download, verify and run the published package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $osName = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'darwin' } else { 'linux' }
+          $archName = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
+            'X64' { 'amd64' }
+            'Arm64' { 'arm64' }
+            default { throw 'unsupported runner architecture' }
+          }
+          $ext = if ($IsWindows) { 'zip' } else { 'tar.gz' }
+          $asset = "aiprice_${osName}_${archName}.${ext}"
+          $dir = Join-Path $env:RUNNER_TEMP 'release-check'
+          New-Item -ItemType Directory $dir | Out-Null
+          gh release download $env:RELEASE_TAG --repo $env:REPOSITORY --dir $dir --pattern $asset --pattern SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'download failed' }
+          $line = Get-Content (Join-Path $dir 'SHA256SUMS.txt') | Where-Object { $_ -match "  $([regex]::Escape($asset))$" }
+          if (@($line).Count -ne 1) { throw 'missing checksum' }
+          $expected = ($line -split '\s+')[0]
+          if ((Get-FileHash (Join-Path $dir $asset) -Algorithm SHA256).Hash -ne $expected) { throw 'checksum mismatch' }
+          $unpack = Join-Path $dir 'unpack'
+          New-Item -ItemType Directory $unpack | Out-Null
+          if ($IsWindows) { Expand-Archive (Join-Path $dir $asset) -DestinationPath $unpack; $binary = Join-Path $unpack 'aiprice.exe' }
+          else { tar -xzf (Join-Path $dir $asset) -C $unpack; if ($LASTEXITCODE -ne 0) { throw 'extract failed' }; $binary = Join-Path $unpack 'aiprice' }
+          $report = & $binary -config (Join-Path $unpack 'examples/media.json') report CNY assistant | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $report.total -ne '7.002' -or $report.entries -ne 3) { throw 'media report failed' }
+          if (!(Test-Path (Join-Path $unpack 'README_zh-CN.md'))) { throw 'Chinese README missing' }
+          Write-Output "Verified $asset and media report"
