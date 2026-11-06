@@ -1,0 +1,16 @@
+{
+  "base_currency": "USD",
+  "rates": {"USD": "1", "CNY": "7.2", "EUR": "0.9"},
+  "agents": {"assistant": {"name": "示例 Agent"}},
+  "models": {"example-model": {"currency": "USD", "input_per_million": "2.5", "output_per_million": "10"}},
+  "usages": {
+    "request-001": {
+      "agent": "assistant",
+      "model": "example-model",
+      "input_tokens": 100000,
+      "output_tokens": 20000,
+      "time": "2026-11-06T12:00:00+08:00",
+      "price": {"currency": "USD", "input_per_million": "2.5", "output_per_million": "10"}
+    }
+  }
+}
