@@ -50,7 +50,7 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		fail(cmd.Run())
-		items := []item{{tmp, bin, 0755}, {"README.md", "README.md", 0644}, {"README_zh-CN.md", "README_zh-CN.md", 0644}, {"LICENSE", "LICENSE", 0644}, {"NOTICE", "NOTICE", 0644}, {"THIRD_PARTY_MODELS_DEV_LICENSE", "THIRD_PARTY_MODELS_DEV_LICENSE", 0644}, {"licenses/gofrs-flock.txt", "licenses/gofrs-flock.txt", 0644}, {"licenses/golang-x-sys.txt", "licenses/golang-x-sys.txt", 0644}, {"examples/aiprice.json", "examples/aiprice.json", 0644}, {"examples/media.json", "examples/media.json", 0644}}
+		items := []item{{tmp, bin, 0755}, {"README.md", "README.md", 0644}, {"README_zh-CN.md", "README_zh-CN.md", 0644}, {"LICENSE", "LICENSE", 0644}, {"NOTICE", "NOTICE", 0644}, {"THIRD_PARTY_MODELS_DEV_LICENSE", "THIRD_PARTY_MODELS_DEV_LICENSE", 0644}, {"licenses/gofrs-flock.txt", "licenses/gofrs-flock.txt", 0644}, {"licenses/golang-x-sys.txt", "licenses/golang-x-sys.txt", 0644}, {"licenses/golang-x-sys-PATENTS.txt", "licenses/golang-x-sys-PATENTS.txt", 0644}, {"examples/aiprice.json", "examples/aiprice.json", 0644}, {"examples/media.json", "examples/media.json", 0644}}
 		name := "aiprice_" + t.os + "_" + t.arch
 		var err error
 		if t.os == "windows" {
