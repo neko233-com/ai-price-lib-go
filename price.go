@@ -176,17 +176,22 @@ func Load(path string) (*Config, error) {
 	if e != nil {
 		return nil, e
 	}
+	return Decode(b)
+}
+
+// Decode validates one JSON ledger without reading from a file.
+func Decode(b []byte) (*Config, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	var c Config
-	if e = dec.Decode(&c); e != nil {
+	if e := dec.Decode(&c); e != nil {
 		return nil, e
 	}
 	var extra any
-	if e = dec.Decode(&extra); e != io.EOF {
+	if e := dec.Decode(&extra); e != io.EOF {
 		return nil, errors.New("configuration must contain one JSON value")
 	}
-	if e = c.Validate(); e != nil {
+	if e := c.Validate(); e != nil {
 		return nil, e
 	}
 	return &c, nil

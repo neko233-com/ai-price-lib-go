@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	aiprice "github.com/neko233-com/ai-price-lib-go"
+	"github.com/neko233-com/ai-price-lib-go/store"
 )
 
 func TestCLIHelper(t *testing.T) {
@@ -50,4 +53,28 @@ func TestConcurrentCLIUpdates(t *testing.T) {
 	if len(c.Agents) != n {
 		t.Fatalf("lost updates: got %d agents, want %d", len(c.Agents), n)
 	}
+}
+
+func TestServerReloadsExternalCLIChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.json")
+	s, err := store.Open(context.Background(), store.Options{Path: path, PollInterval: 25 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCLIHelper$")
+	cmd.Env = append(os.Environ(), "AIPRICE_HELPER=1", "AIPRICE_PATH="+path, "AIPRICE_ID=external-agent")
+	cmd.Stdin = strings.NewReader(`{"name":"External agent"}`)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("CLI update: %v %s", err, out)
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := s.Snapshot()
+		if err == nil && c.Agents["external-agent"].Name == "External agent" {
+			return
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatal("server did not observe external CLI update")
 }

@@ -5,10 +5,10 @@ import (
 	"regexp"
 )
 
-// MediaPrice defines a price per Per units for an audio or video model.
+// MediaPrice defines a price per Per units for a text, audio, or video model.
 // Multiple components of one request should use separate IDs and usage records.
 type MediaPrice struct {
-	Modality string `json:"modality"` // audio or video
+	Modality string `json:"modality"` // text, audio, or video
 	Model    string `json:"model"`    // provider/model and optional variant
 	Currency string `json:"currency"`
 	Unit     string `json:"unit"` // e.g. second, character, token, request
@@ -28,8 +28,8 @@ type MediaUsage struct {
 var unitPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 func (c *Config) validateMediaPrice(p MediaPrice) error {
-	if p.Modality != "audio" && p.Modality != "video" {
-		return fmt.Errorf("modality must be audio or video")
+	if p.Modality != "text" && p.Modality != "audio" && p.Modality != "video" {
+		return fmt.Errorf("modality must be text, audio or video")
 	}
 	if !validID(p.Model) || !unitPattern.MatchString(p.Unit) {
 		return fmt.Errorf("invalid model or unit")

@@ -37,6 +37,7 @@ type Catalog struct {
 	Models      map[string]Entry            `json:"models"`
 	Skipped     int                         `json:"skipped"`
 	AudioPrices map[string]price.MediaPrice `json:"audio_prices,omitempty"`
+	ExtraPrices map[string]price.MediaPrice `json:"extra_prices,omitempty"`
 }
 type rawModel struct {
 	Name       string `json:"name"`
@@ -49,6 +50,9 @@ type rawModel struct {
 		Output      *json.Number    `json:"output"`
 		InputAudio  *json.Number    `json:"input_audio"`
 		OutputAudio *json.Number    `json:"output_audio"`
+		CacheRead   *json.Number    `json:"cache_read"`
+		CacheWrite  *json.Number    `json:"cache_write"`
+		Reasoning   *json.Number    `json:"reasoning"`
 		Tiers       json.RawMessage `json:"tiers"`
 		Context     json.RawMessage `json:"context_over_200k"`
 	} `json:"cost"`
@@ -129,7 +133,7 @@ func Parse(r io.Reader, retrieved time.Time) (*Catalog, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("empty catalog")
 	}
-	c := &Catalog{Source: Source, RetrievedAt: retrieved.UTC().Format(time.RFC3339), Models: map[string]Entry{}, AudioPrices: map[string]price.MediaPrice{}}
+	c := &Catalog{Source: Source, RetrievedAt: retrieved.UTC().Format(time.RFC3339), Models: map[string]Entry{}, AudioPrices: map[string]price.MediaPrice{}, ExtraPrices: map[string]price.MediaPrice{}}
 	for provider, p := range raw {
 		for model, m := range p.Models {
 			if provider != "" && model != "" && strings.TrimSpace(provider) == provider && strings.TrimSpace(model) == model {
@@ -171,6 +175,60 @@ func Parse(r io.Reader, retrieved time.Time) (*Catalog, error) {
 			}
 			tiered := (len(m.Cost.Tiers) > 0 && string(m.Cost.Tiers) != "null" && string(m.Cost.Tiers) != "[]") || (len(m.Cost.Context) > 0 && string(m.Cost.Context) != "null")
 			c.Models[key] = Entry{Provider: provider, Model: model, Name: m.Name, Price: price.Price{Currency: "USD", Input: in, Output: out}, Tiered: tiered}
+			addComponent := func(suffix string, n *json.Number) error {
+				if n == nil {
+					return nil
+				}
+				amount, e := exact(*n)
+				if e != nil || amount == "0" {
+					return nil
+				}
+				id := key + "#" + suffix + "-token"
+				if _, exists := c.ExtraPrices[id]; exists {
+					return fmt.Errorf("duplicate component ID %s", id)
+				}
+				c.ExtraPrices[id] = price.MediaPrice{Modality: "text", Model: key, Currency: "USD", Unit: "token", Amount: amount, Per: "1000000"}
+				return nil
+			}
+			for _, part := range []struct {
+				name  string
+				value *json.Number
+			}{{"cache-read", m.Cost.CacheRead}, {"cache-write", m.Cost.CacheWrite}, {"reasoning", m.Cost.Reasoning}} {
+				if err := addComponent(part.name, part.value); err != nil {
+					return nil, err
+				}
+			}
+			if len(m.Cost.Tiers) > 0 && string(m.Cost.Tiers) != "null" {
+				var tiers []struct {
+					Tier struct {
+						Type string      `json:"type"`
+						Size json.Number `json:"size"`
+					} `json:"tier"`
+					Input      *json.Number `json:"input"`
+					Output     *json.Number `json:"output"`
+					CacheRead  *json.Number `json:"cache_read"`
+					CacheWrite *json.Number `json:"cache_write"`
+					Reasoning  *json.Number `json:"reasoning"`
+				}
+				if err := json.Unmarshal(m.Cost.Tiers, &tiers); err == nil {
+					for _, tier := range tiers {
+						size, e := strconv.ParseUint(string(tier.Tier.Size), 10, 64)
+						if e != nil || size == 0 || tier.Tier.Type != "context" {
+							continue
+						}
+						prefix := fmt.Sprintf("context-%d-", size)
+						for _, part := range []struct {
+							name  string
+							value *json.Number
+						}{{"input", tier.Input}, {"output", tier.Output}, {"cache-read", tier.CacheRead}, {"cache-write", tier.CacheWrite}, {"reasoning", tier.Reasoning}} {
+							if err := addComponent(prefix+part.name, part.value); err != nil {
+								return nil, err
+							}
+						}
+					}
+				}
+			}
+
 		}
 	}
 	if len(c.Models) == 0 && len(c.AudioPrices) == 0 {
@@ -243,6 +301,18 @@ func (c *Catalog) SearchAudio(query string) map[string]price.MediaPrice {
 	query = strings.ToLower(query)
 	for id, p := range c.AudioPrices {
 		if strings.Contains(strings.ToLower(id), query) {
+			out[id] = p
+		}
+	}
+	return out
+}
+
+// SearchExtras returns explicit text cache, reasoning and context-tier token rates.
+func (c *Catalog) SearchExtras(query string) map[string]price.MediaPrice {
+	out := map[string]price.MediaPrice{}
+	q := strings.ToLower(query)
+	for id, p := range c.ExtraPrices {
+		if strings.Contains(strings.ToLower(id), q) {
 			out[id] = p
 		}
 	}

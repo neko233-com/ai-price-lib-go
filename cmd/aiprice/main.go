@@ -42,7 +42,7 @@ func run() error {
 	fs := flag.NewFlagSet("aiprice", flag.ContinueOnError)
 	path := fs.String("config", "aiprice.json", "configuration file")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "usage: aiprice [-config file] init BASE | put KIND ID | get KIND [ID] | delete KIND ID | report CURRENCY [AGENT] | convert AMOUNT FROM TO | catalog search QUERY | catalog search-media QUERY | catalog import [embedded|online] [overwrite]\nput reads a JSON value from standard input; KIND is agent, model, rate, usage, media-price or media-usage")
+		fmt.Fprintln(fs.Output(), "usage: aiprice [-config file] init BASE | put KIND ID | get KIND [ID] | delete KIND ID | report CURRENCY [AGENT] | convert AMOUNT FROM TO | catalog search QUERY | catalog search-media QUERY | catalog search-components QUERY | catalog import [embedded|online] [overwrite]\nput reads a JSON value from standard input; KIND is agent, model, rate, usage, media-price or media-usage")
 	}
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -52,8 +52,8 @@ func run() error {
 		fs.Usage()
 		return errors.New("missing command")
 	}
-	mutating := args[0] == "init" || args[0] == "put" || args[0] == "delete" || (args[0] == "catalog" && len(args) > 1 && args[1] == "import")
-	if mutating {
+	catalogSearch := args[0] == "catalog" && len(args) > 1 && (args[1] == "search" || args[1] == "search-media" || args[1] == "search-components")
+	if !catalogSearch {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return aiprice.WithFileLock(ctx, *path, func() error { return runCommand(*path, args) })
@@ -73,7 +73,7 @@ func runCommand(path string, args []string) error {
 		}
 		return aiprice.New(args[1]).Save(path)
 	}
-	if args[0] == "catalog" && len(args) >= 2 && (args[1] == "search" || args[1] == "search-media") {
+	if args[0] == "catalog" && len(args) >= 2 && (args[1] == "search" || args[1] == "search-media" || args[1] == "search-components") {
 		if len(args) != 3 {
 			return errors.New("catalog search requires QUERY")
 		}
@@ -81,10 +81,29 @@ func runCommand(path string, args []string) error {
 		if err != nil {
 			return err
 		}
-		if args[1] == "search-media" {
-			return printJSON(cat.SearchAudio(args[2]))
+		if args[1] == "search-media" || args[1] == "search-components" {
+			lite, err := catalog.EmbeddedLiteLLM()
+			if err != nil {
+				return err
+			}
+			results := cat.SearchAudio(args[2])
+			for id, p := range lite.Search(args[2]) {
+				results[id] = p
+			}
+			for id, p := range cat.SearchExtras(args[2]) {
+				results[id] = p
+			}
+			return printJSON(results)
 		}
-		return printJSON(cat.Search(args[2]))
+		lite, err := catalog.EmbeddedLiteLLM()
+		if err != nil {
+			return err
+		}
+		results := cat.Search(args[2])
+		for id, p := range lite.SearchText(args[2]) {
+			results[id] = p
+		}
+		return printJSON(results)
 	}
 	c, err := aiprice.Load(path)
 	if err != nil {
@@ -107,11 +126,18 @@ func runCommand(path string, args []string) error {
 			overwrite = true
 		}
 		var cat *catalog.Catalog
+		var lite *catalog.MediaCatalog
 		switch source {
 		case "embedded":
 			cat, err = catalog.Embedded()
+			if err == nil {
+				lite, err = catalog.EmbeddedLiteLLM()
+			}
 		case "online":
 			cat, err = catalog.Fetch(context.Background(), nil, catalog.Source)
+			if err == nil {
+				lite, err = catalog.FetchLiteLLM(context.Background(), nil, catalog.LiteLLMSource)
+			}
 		default:
 			return errors.New("source must be embedded or online")
 		}
@@ -122,7 +148,19 @@ func runCommand(path string, args []string) error {
 		if err != nil {
 			return err
 		}
+		liteTextAdded, liteTextUpdated, liteTextSkipped, err := c.ImportModels(lite.TextPrices, overwrite)
+		if err != nil {
+			return err
+		}
 		mediaAdded, mediaUpdated, mediaSkipped, err := c.ImportMediaPrices(cat.AudioPrices, overwrite)
+		if err != nil {
+			return err
+		}
+		extraAdded, extraUpdated, extraSkipped, err := c.ImportMediaPrices(cat.ExtraPrices, overwrite)
+		if err != nil {
+			return err
+		}
+		genAdded, genUpdated, genSkipped, err := c.ImportMediaPrices(lite.Prices, overwrite)
 		if err != nil {
 			return err
 		}
@@ -135,7 +173,7 @@ func runCommand(path string, args []string) error {
 				tiered++
 			}
 		}
-		return printJSON(map[string]any{"source": cat.Source, "retrieved_at": cat.RetrievedAt, "available": len(cat.Models), "source_skipped": cat.Skipped, "tiered_models": tiered, "added": added, "updated": updated, "existing_skipped": skipped, "audio_available": len(cat.AudioPrices), "audio_added": mediaAdded, "audio_updated": mediaUpdated, "audio_existing_skipped": mediaSkipped})
+		return printJSON(map[string]any{"source": cat.Source, "retrieved_at": cat.RetrievedAt, "available": len(cat.Models), "source_skipped": cat.Skipped, "tiered_models": tiered, "added": added, "updated": updated, "existing_skipped": skipped, "audio_available": len(cat.AudioPrices), "audio_added": mediaAdded, "audio_updated": mediaUpdated, "audio_existing_skipped": mediaSkipped, "text_components_available": len(cat.ExtraPrices), "text_components_added": extraAdded, "text_components_updated": extraUpdated, "text_components_existing_skipped": extraSkipped, "litellm_text_available": len(lite.TextPrices), "litellm_text_added": liteTextAdded, "litellm_text_updated": liteTextUpdated, "litellm_text_existing_skipped": liteTextSkipped, "litellm_source": lite.Source, "litellm_retrieved_at": lite.RetrievedAt, "litellm_components_available": len(lite.Prices), "litellm_components_added": genAdded, "litellm_components_updated": genUpdated, "litellm_components_existing_skipped": genSkipped})
 	case "put":
 		if len(args) != 3 {
 			return errors.New("put requires KIND ID")

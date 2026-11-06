@@ -1,0 +1,30 @@
+{
+  "snapshots": [
+    {
+      "source": "https://models.dev/api.json",
+      "retrieved_at": "2026-11-06T04:02:56Z",
+      "source_sha256": "a13664efe659aec4e394de5aead54ff551d4db47061022cbc1d54b1603658dc0",
+      "snapshot_sha256": "6775cfd18fab0e480039c85adcaa954aeac0c5c80b4f87057d4a06118082cb73",
+      "snapshot": "snapshot.json.gz",
+      "counts": {
+        "text_models": 7944,
+        "audio_token_components": 228,
+        "text_components": 10788,
+        "generation_components": 0
+      }
+    },
+    {
+      "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+      "retrieved_at": "2026-11-06T04:05:40Z",
+      "source_sha256": "90d346cef4df9435a393fc224dfbf8d500daa096dcd8c7249b6515682a51f405",
+      "snapshot_sha256": "24adf486d7cbc5818186b2704dd4fbd1d411ee5cbb70b3af36455f12fd1fbcf6",
+      "snapshot": "litellm.json.gz",
+      "counts": {
+        "text_models": 3434,
+        "audio_token_components": 0,
+        "text_components": 5556,
+        "generation_components": 366
+      }
+    }
+  ]
+}

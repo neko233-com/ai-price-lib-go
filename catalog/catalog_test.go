@@ -85,3 +85,24 @@ func TestAudioComponentsDoNotBecomeTextPrices(t *testing.T) {
 		t.Fatalf("%s %v", got, err)
 	}
 }
+func TestTextCacheAndContextTierComponents(t *testing.T) {
+	fixture := `{"p":{"models":{"model":{"name":"Text","modalities":{"input":["text"],"output":["text"]},"cost":{"input":2,"output":8,"cache_read":0.5,"cache_write":1,"reasoning":4,"tiers":[{"tier":{"type":"context","size":200000},"input":4,"output":16,"cache_read":1}]}}}}}`
+	c, err := Parse(strings.NewReader(fixture), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.ExtraPrices) != 6 {
+		t.Fatalf("components: %d", len(c.ExtraPrices))
+	}
+	p := c.ExtraPrices["p/model#context-200000-input-token"]
+	if p.Modality != "text" || p.Unit != "token" || p.Amount != "4" || p.Per != "1000000" {
+		t.Fatalf("%+v", p)
+	}
+	ledger := price.New("USD")
+	if _, _, _, err = ledger.ImportMediaPrices(c.ExtraPrices, false); err != nil {
+		t.Fatal(err)
+	}
+	if amount, err := ledger.QuoteMedia("p/model#cache-read-token", "1000000", "USD"); err != nil || amount != "0.5" {
+		t.Fatalf("%s %v", amount, err)
+	}
+}

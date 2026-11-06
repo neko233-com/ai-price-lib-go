@@ -64,3 +64,10 @@ func UpdateFile(ctx context.Context, path string, fn func(*Config) error) error 
 		return c.Save(path)
 	})
 }
+
+// LoadFile reads while holding the same lock used by UpdateFile and the Store watcher.
+// Prefer this to Load when other processes may replace the file, especially on Windows.
+func LoadFile(ctx context.Context, path string) (c *Config, err error) {
+	err = WithFileLock(ctx, path, func() error { var e error; c, e = Load(path); return e })
+	return
+}

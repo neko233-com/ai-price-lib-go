@@ -1,3 +1,4 @@
-模型价格快照来自 Models.dev (https://models.dev/api.json)。
-上游项目：https://github.com/anomalyco/models.dev
-数据按供应商/模型筛选并转换；上游 MIT 许可证见 THIRD_PARTY_MODELS_DEV_LICENSE。
+The embedded pricing snapshots include:
+- Models.dev (https://models.dev/api.json), project https://github.com/anomalyco/models.dev. See THIRD_PARTY_MODELS_DEV_LICENSE.
+- LiteLLM (https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json). This root-level data is covered by the upstream MIT license; see THIRD_PARTY_LITELLM_LICENSE.
+The snapshots are filtered and transformed. Prices are estimates and may be incomplete or out of date.
